@@ -6,6 +6,6 @@ if [[ -z "${DEVELOPER_DIR:-}" && -x /Library/Developer/CommandLineTools/usr/bin/
 fi
 mkdir -p build/module-cache
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path build/module-cache \
-    -target "$(uname -m)-apple-macos14.0" Sources/SpaceMap/{FileTree,Queue,Volumes,Workspace,Sunburst}.swift \
+    -target "$(uname -m)-apple-macos14.0" Sources/SpaceMap/{FileTree,DirectoryReader,Queue,Volumes,Workspace,Sunburst}.swift \
     Tests/Checks.swift -o build/SpaceMapChecks
 build/SpaceMapChecks "$@"

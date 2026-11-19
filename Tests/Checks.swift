@@ -8,6 +8,36 @@ struct Checks {
         print("✓ " + label)
     }
 
+    static func checkBatchedListing(in directory: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: directory, withIntermediateDirectories: false)
+        for index in 0..<1000 {
+            try Data().write(to: directory.appendingPathComponent("запись-\(index)"))
+        }
+        let sparse = directory.appendingPathComponent("разреженный файл")
+        try Data([1]).write(to: sparse)
+        let handle = try FileHandle(forWritingTo: sparse)
+        try handle.truncate(atOffset: 128 * 1024 * 1024)
+        try handle.close()
+
+        let dataFile = directory.appendingPathComponent("две вилки")
+        try Data([2]).write(to: dataFile)
+        try Data(repeating: 3, count: 16_384).write(to: URL(fileURLWithPath: dataFile.path + "/..namedfork/rsrc"))
+        let snapshot = try Scanner().scan(directory)
+        expect(snapshot.root.children.count == 1002 && snapshot.issues.isEmpty, "несколько порций метаданных без потерь")
+        var total: Int64 = 0
+        for child in snapshot.root.children {
+            let status = try fileStatus(child.url)
+            precondition(child.identity == FileID(status) && child.rawBytes == status.st_blocks * 512)
+            total += status.st_blocks * 512
+        }
+        expect(total == snapshot.root.bytes, "пакетный обход совпадает с индивидуальным учётом байтов")
+        for url in [sparse, dataFile] {
+            let single = try Scanner().scan(url).root
+            expect(snapshot.root.find(url.path)?.signature == single.signature, "проверка перед удалением: " + url.lastPathComponent)
+        }
+    }
+
     @MainActor static func main() async throws {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("SpaceMap-Tests-" + UUID().uuidString)
@@ -20,6 +50,7 @@ struct Checks {
             try Data(repeating: 0x52, count: count).write(to: url)
             return url
         }
+        try checkBatchedListing(in: base.appendingPathComponent("Много файлов"))
         let a = try write("A/alpha", 20_000)
         let b = base.appendingPathComponent("beta")
         try fm.linkItem(at: a, to: b)
