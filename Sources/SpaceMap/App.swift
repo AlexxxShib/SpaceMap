@@ -132,17 +132,27 @@ struct PathMenu: View {
         return entries.reversed()
     }
     var body: some View {
+        let entries = chain
+        let visible = entries.suffix(3)
         HStack(spacing: 5) {
-            if chain.count > 3 {
+            if entries.count > 3 {
                 Menu("…") {
-                    ForEach(Array(chain.dropLast(3))) { e in Button(store.title(e)) { store.open(e) } }
+                    ForEach(entries.dropLast(3)) { e in Button(store.title(e)) { store.open(e) } }
                 }.fixedSize()
             }
-            ForEach(Array(chain.suffix(3))) { e in
-                if e !== chain.suffix(3).first { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
-                Button(store.title(e)) { store.open(e) }.buttonStyle(.plain).lineLimit(1).truncationMode(.middle)
+            ForEach(visible) { e in
+                if e !== visible.first { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary).fixedSize() }
+                let title = store.title(e)
+                Button { store.open(e) } label: {
+                    Text(verbatim: title).lineLimit(1).truncationMode(.tail)
+                }
+                .buttonStyle(.plain)
+                .help(title)
             }
         }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: 280, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
