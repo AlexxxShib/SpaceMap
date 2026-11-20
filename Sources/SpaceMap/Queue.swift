@@ -67,15 +67,15 @@ enum Trash {
         try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
     }) -> TrashResult {
         do {
-            guard Disk(disk.url, folder: disk.isFolder)?.id == disk.id else { return .skipped("Диск недоступен") }
+            guard Disk(disk.url, folder: disk.isFolder)?.id == disk.id else { return .skipped("Disk unavailable") }
             let path = mark.url.path
             guard path != disk.url.path, path.hasPrefix(disk.url.path == "/" ? "/" : disk.url.path + "/"),
-                  FileID(try fileStatus(mark.url)) == mark.identity else { return .skipped("Объект по этому пути изменился") }
+                  FileID(try fileStatus(mark.url)) == mark.identity else { return .skipped("The item at this path has changed.") }
             let fresh = try Scanner().scan(mark.url).root
-            guard fresh.identity == mark.identity else { return .skipped("Объект заменён") }
-            guard fresh.unknown == 0 && !fresh.excludedChildren else { return .skipped("Нельзя проверить всё содержимое") }
+            guard fresh.identity == mark.identity else { return .skipped("The item has been replaced.") }
+            guard fresh.unknown == 0 && !fresh.excludedChildren else { return .skipped("Couldn’t verify all contents.") }
             if fresh.signature != mark.signature, let updated = Mark(fresh) { return .changed(updated) }
-            guard FileID(try fileStatus(mark.url)) == mark.identity else { return .skipped("Объект заменён") }
+            guard FileID(try fileStatus(mark.url)) == mark.identity else { return .skipped("The item has been replaced.") }
             try move(mark.url)
             return .moved
         } catch { return .skipped(error.localizedDescription) }

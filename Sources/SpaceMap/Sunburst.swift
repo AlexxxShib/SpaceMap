@@ -92,7 +92,7 @@ final class RingView: NSView, NSMenuDelegate {
         needsDisplay = true
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
-        setAccessibilityLabel("Карта, " + (store?.title(root) ?? root.name) + ", " + sizeText(root.bytes) + ". Объекты доступны в списке.")
+        setAccessibilityLabel("Map, " + (store?.title(root) ?? root.name) + ", " + sizeText(root.bytes) + ". Items are available in the list.")
     }
 
     override func layout() { super.layout(); rebuild() }
@@ -189,7 +189,7 @@ final class RingView: NSView, NSMenuDelegate {
         let (_, i) = hit(convert(event.locationInWindow, from: nil))
         if i != hover {
             hover = i
-            toolTip = i.map { (arcs[$0].group ? "Мелкие объекты" : arcs[$0].entry.name) + " · " + sizeText(arcs[$0].weight) }
+            toolTip = i.map { (arcs[$0].group ? "Small items" : arcs[$0].entry.name) + " · " + sizeText(arcs[$0].weight) }
             needsDisplay = true
         }
     }
@@ -210,11 +210,11 @@ final class RingView: NSView, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         if entry.folder {
-            menu.addItem(withTitle: "Открыть папку", action: #selector(openFolder), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "Open Folder", action: #selector(openFolder), keyEquivalent: "").target = self
         }
         let marked = store.queue.covering(entry.url.path)?.id == entry.url.path
         let reason = store.blocked(entry)
-        let item = menu.addItem(withTitle: marked ? "Снять отметку" : reason ?? "Пометить для удаления", action: #selector(markItem), keyEquivalent: "")
+        let item = menu.addItem(withTitle: marked ? "Unmark" : reason ?? "Mark for Removal", action: #selector(markItem), keyEquivalent: "")
         item.isEnabled = !store.busy && (marked || reason == nil)
         item.target = self
         return menu

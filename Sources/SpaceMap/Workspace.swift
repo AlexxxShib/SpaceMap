@@ -46,7 +46,7 @@ final class Workspace: ObservableObject {
         let target: Disk?
         if folder, let data = saved["bookmark"] as? Data {
             guard let selection = try? FolderSelection(resolving: data) else {
-                notice = "Чтобы открыть сохранённую карту, выберите папку ещё раз."
+                notice = "Choose the folder again to open its saved map."
                 return
             }
             target = Disk(selection: selection)
@@ -74,14 +74,14 @@ final class Workspace: ObservableObject {
     var queue: RemovalQueue { queues[disk?.id ?? ""] ?? RemovalQueue() }
     var summary: String {
         let q = queue
-        return "\(q.entries.count) · " + sizeText(q.bytes) + (q.entries.contains { $0.unknown > 0 } ? " + неизвестный размер" : "")
+        return "\(q.entries.count) · " + sizeText(q.bytes) + (q.entries.contains { $0.unknown > 0 } ? " + unknown size" : "")
     }
 
     func pickFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.prompt = "Сканировать"
+        panel.prompt = "Scan"
         panel.begin { result in
             if result == .OK, let url = panel.url, let disk = Disk(selection: FolderSelection(url)) {
                 self.scan(disk)
@@ -167,7 +167,7 @@ final class Workspace: ObservableObject {
                 let result = try await job.value
                 guard token == generation else { return }
                 guard let currentDisk = target.refreshed(), currentDisk.id == target.id else {
-                    throw NSError(domain: "SpaceMap", code: 1, userInfo: [NSLocalizedDescriptionKey: "Диск отключён или заменён"])
+                    throw NSError(domain: "SpaceMap", code: 1, userInfo: [NSLocalizedDescriptionKey: "The disk was disconnected or replaced."])
                 }
                 disk = currentDisk
                 snapshot = result
@@ -193,11 +193,11 @@ final class Workspace: ObservableObject {
                 for i in q.entries.indices {
                     let mark = q.entries[i]
                     guard let fresh = result.root.find(mark.id), fresh.identity == mark.identity else {
-                        q.entries[i].problem = "Объект исчез или был заменён"
+                        q.entries[i].problem = "The item is missing or has been replaced."
                         continue
                     }
                     if fresh.signature != mark.signature, var updated = Mark(fresh) {
-                        updated.problem = "Объект изменился. Проверьте перед подтверждением."
+                        updated.problem = "The item has changed. Review it before confirming."
                         q.entries[i] = updated
                     }
                 }
@@ -250,14 +250,14 @@ final class Workspace: ObservableObject {
     }
 
     func blocked(_ entry: Entry) -> String? {
-        if busy { return "Операция выполняется" }
-        if !online { return "Диск недоступен" }
-        if disk?.readOnly == true { return "Том только для чтения" }
-        if entry === snapshot?.root { return "Корень сканирования" }
-        if entry.identity == nil { return "Не удалось проверить объект" }
-        if entry.excludedChildren { return "Папка содержит исключённые пути" }
-        if let existing = queue.covering(entry.url.path), existing.id != entry.url.path { return "В составе папки" }
-        if !FileManager.default.isDeletableFile(atPath: entry.url.path) { return "Недостаточно прав" }
+        if busy { return "An operation is in progress" }
+        if !online { return "Disk unavailable" }
+        if disk?.readOnly == true { return "This volume is read-only" }
+        if entry === snapshot?.root { return "This is the root of the scan" }
+        if entry.identity == nil { return "Couldn’t verify the item" }
+        if entry.excludedChildren { return "This folder contains excluded paths" }
+        if let existing = queue.covering(entry.url.path), existing.id != entry.url.path { return "Included in a marked folder" }
+        if !FileManager.default.isDeletableFile(atPath: entry.url.path) { return "Insufficient permissions" }
         return nil
     }
 
@@ -291,14 +291,14 @@ final class Workspace: ObservableObject {
                 case .skipped(let message): mark.problem = message
                 case .changed(let fresh):
                     mark = fresh
-                    mark.problem = "Размер или состав изменился. Проверьте и подтвердите повторно."
+                    mark.problem = "The size or contents have changed. Review the item and confirm again."
                 }
                 remaining.entries.append(mark)
             }
             queues[disk.id] = remaining
             busy = false
-            notice = "Перемещено в Корзину: \(moved). Пропущено: \(remaining.entries.count)." +
-                (remaining.entries.isEmpty ? "" : " Причины указаны в очереди.")
+            notice = "Moved to Trash: \(moved). Skipped: \(remaining.entries.count)." +
+                (remaining.entries.isEmpty ? "" : " See the removal queue for details.")
             if moved > 0 { scan(disk, keepMap: true) }
         }
     }

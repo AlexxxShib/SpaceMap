@@ -218,7 +218,7 @@ struct ScanCache {
             let db = try MapDatabase(file, readOnly: false)
             try db.sql("BEGIN IMMEDIATE")
             writer = db
-        } catch { warning("Не удалось сохранить карту: " + error.localizedDescription) }
+        } catch { warning("Couldn’t save the map: " + error.localizedDescription) }
         let previous = forceFull ? nil : try? MapReader(file: file, disk: disk, damaged: damaged)
         if let previous { preview(previous.snapshot(disk)) }
         let start = checkpoint(disk.url)
@@ -257,7 +257,7 @@ struct ScanCache {
         }
         func clearListings() {
             do { try writer?.sql("DELETE FROM entries") }
-            catch { writer = nil; warning("Не удалось сохранить карту: " + error.localizedDescription) }
+            catch { writer = nil; warning("Couldn’t save the map: " + error.localizedDescription) }
         }
         if changes == nil { clearListings() }
         scanner.excludedDirectory = (try? fileStatus(directory)).map(FileID.init)
@@ -273,7 +273,7 @@ struct ScanCache {
                 }
                 try db.write(node.children.map { SavedEntry($0) }, key: path)
                 listings.removeValue(forKey: path)
-            } catch { writer = nil; warning("Не удалось сохранить карту: " + error.localizedDescription) }
+            } catch { writer = nil; warning("Couldn’t save the map: " + error.localizedDescription) }
         }
         defer { scanner.reuse = nil; scanner.didRead = nil }
         var result = try scanner.scan(disk.url)
@@ -298,7 +298,7 @@ struct ScanCache {
                 try Task.checkCancellation()
                 try writer.sql("COMMIT")
             } catch is CancellationError { throw CancellationError() }
-            catch { warning("Не удалось сохранить карту: " + error.localizedDescription) }
+            catch { warning("Couldn’t save the map: " + error.localizedDescription) }
         }
         return result
     }

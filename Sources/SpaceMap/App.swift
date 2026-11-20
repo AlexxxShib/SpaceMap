@@ -13,22 +13,22 @@ struct SpaceMapApp: App {
         }
         .defaultSize(width: 1080, height: 680)
         .commands {
-            CommandMenu("Разрешения") {
-                Button("Файлы и папки…") {
+            CommandMenu("Permissions") {
+                Button("Files and Folders…") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")!)
                 }
-                Button("Полный доступ к диску…") {
+                Button("Full Disk Access…") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
                 }
                 Divider()
-                Button("Показать Space Map в Finder") {
+                Button("Show Space Map in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
                 }
             }
             CommandGroup(after: .newItem) {
-                Button("Сканировать папку…") { store.pickFolder() }
+                Button("Scan Folder…") { store.pickFolder() }
                     .keyboardShortcut("o").disabled(store.busy || store.screen == .scanning)
-                Button("Пересканировать полностью") {
+                Button("Run Full Scan") {
                     if let disk = store.disk { store.scan(disk, forceFull: true) }
                 }.keyboardShortcut("r", modifiers: [.command, .shift])
                  .disabled(store.busy || store.screen != .map)
@@ -67,7 +67,7 @@ struct ContentView: View {
                             Image(systemName: "internaldrive")
                             Text(disk.title).lineLimit(1)
                             Spacer()
-                            Text("Доступно " + sizeText(disk.available))
+                            Text("Available: " + sizeText(disk.available))
                         }.font(.caption).foregroundStyle(.secondary)
                             .padding(.horizontal, 22).padding(.bottom, 15)
                     }.frame(minWidth: 370, idealWidth: 650, maxWidth: .infinity)
@@ -81,18 +81,18 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     if !store.queue.entries.isEmpty {
                         Image(systemName: "tray.full")
-                        Text("К удалению").fontWeight(.medium)
+                        Text("Marked for Removal").fontWeight(.medium)
                         Text(store.summary).monospacedDigit()
-                        Button("Посмотреть") { dialogs.panel = .queue }
+                        Button("Review") { dialogs.panel = .queue }
                         Spacer()
-                        Button("Удалить…") {
-                            dialogs.confirmSummary = (store.queue.entries.count == 1 ? store.queue.entries[0].url.lastPathComponent + " · " : "Объекты: ") + store.summary
+                        Button("Move to Trash…") {
+                            dialogs.confirmSummary = (store.queue.entries.count == 1 ? store.queue.entries[0].url.lastPathComponent + " · " : "Items: ") + store.summary
                             dialogs.confirming = true
                         }.disabled(store.busy || !store.online)
                     } else {
                         Image(systemName: "clock").foregroundStyle(.secondary)
                         if let date = store.snapshot?.finished {
-                            Text((store.busy ? "Обновление карты · " : "Сканирование · ") + date.formatted(date: .abbreviated, time: .standard)).foregroundStyle(.secondary)
+                            Text((store.busy ? "Updating map · " : "Scanned · ") + date.formatted(date: .abbreviated, time: .standard)).foregroundStyle(.secondary)
                         }
                         Spacer()
                     }
@@ -100,9 +100,9 @@ struct ContentView: View {
                     Button {
                         dialogs.panel = .coverage
                     } label: {
-                        if !store.online { Label("Диск недоступен", systemImage: "externaldrive.badge.xmark") }
-                        else if store.snapshot?.issues.isEmpty == false { Label("Сканирование неполное", systemImage: "exclamationmark.circle") }
-                        else { Image(systemName: "info.circle").accessibilityLabel("Сведения о сканировании") }
+                        if !store.online { Label("Disk unavailable", systemImage: "externaldrive.badge.xmark") }
+                        else if store.snapshot?.issues.isEmpty == false { Label("Scan incomplete", systemImage: "exclamationmark.circle") }
+                        else { Image(systemName: "info.circle").accessibilityLabel("Scan Details") }
                     }.buttonStyle(.borderless)
                 }.font(.callout).padding(.horizontal, 18).frame(height: 46)
             } else {
@@ -113,27 +113,27 @@ struct ContentView: View {
         .toolbar {
             if store.screen == .map {
                 ToolbarItemGroup(placement: .navigation) {
-                    Button { store.showDisks() } label: { Image(systemName: "internaldrive").accessibilityLabel("Выбрать диск") }
-                        .help("К выбору диска").disabled(!store.canChooseDisk)
-                    Button { store.step(-1) } label: { Image(systemName: "chevron.left").accessibilityLabel("Назад") }
+                    Button { store.showDisks() } label: { Image(systemName: "internaldrive").accessibilityLabel("Choose Disk") }
+                        .help("Return to disk selection").disabled(!store.canChooseDisk)
+                    Button { store.step(-1) } label: { Image(systemName: "chevron.left").accessibilityLabel("Back") }
                         .disabled(store.position == 0).keyboardShortcut("[")
-                    Button { store.step(1) } label: { Image(systemName: "chevron.right").accessibilityLabel("Вперёд") }
+                    Button { store.step(1) } label: { Image(systemName: "chevron.right").accessibilityLabel("Forward") }
                         .disabled(store.position + 1 >= store.history.count).keyboardShortcut("]")
                 }
                 ToolbarItem { PathMenu(store: store) }
                 ToolbarItem(placement: .primaryAction) {
                     Button { if let disk = store.disk { store.scan(disk) } } label: {
-                        Label("Сканировать снова", systemImage: "arrow.clockwise")
-                    }.help("Сканировать снова").keyboardShortcut("r").disabled(store.busy)
+                        Label("Rescan", systemImage: "arrow.clockwise")
+                    }.help("Rescan").keyboardShortcut("r").disabled(store.busy)
                 }
             }
         }
         .sheet(item: $dialogs.panel) { choice in
             DetailSheet(store: store, queueMode: choice == .queue) { dialogs.panel = nil }
         }
-        .alert("Переместить выбранные объекты в Корзину?", isPresented: $dialogs.confirming) {
-            Button("Отмена", role: .cancel) {}
-            Button("Переместить в Корзину", role: .destructive) { store.trashConfirmed() }
+        .alert("Move the selected items to the Trash?", isPresented: $dialogs.confirming) {
+            Button("Cancel", role: .cancel) {}
+            Button("Move to Trash", role: .destructive) { store.trashConfirmed() }
         } message: { Text(dialogs.confirmSummary) }
         .alert("Space Map", isPresented: Binding(get: { store.notice != nil }, set: { if !$0 { store.notice = nil } })) {
             Button("OK") { store.notice = nil }
@@ -182,8 +182,8 @@ struct DiskChooser: View {
             HStack(alignment: .center, spacing: 14) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 57, height: 57)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(scanning ? "Сканирование" : "Диски").font(.system(size: 31, weight: .semibold))
-                    Text(scanning ? (store.disk?.title ?? "") : "Выберите диск для анализа занятого места.")
+                    Text(scanning ? "Scanning" : "Disks").font(.system(size: 31, weight: .semibold))
+                    Text(scanning ? (store.disk?.title ?? "") : "Choose a disk to see how its space is used.")
                         .font(.body).foregroundStyle(.secondary)
                 }
             }
@@ -191,9 +191,9 @@ struct DiskChooser: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ProgressView().progressViewStyle(.linear)
                     HStack {
-                        Text("Просмотрено объектов: " + store.progress.0.formatted()).monospacedDigit()
+                        Text("Items scanned: " + store.progress.0.formatted()).monospacedDigit()
                         Spacer()
-                        Button("Отменить") { store.showDisks() }.keyboardShortcut(.cancelAction)
+                        Button("Cancel") { store.showDisks() }.keyboardShortcut(.cancelAction)
                     }
                     Text(store.progress.1).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }.padding(20).background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
@@ -205,23 +205,23 @@ struct DiskChooser: View {
                                 Image(nsImage: NSWorkspace.shared.icon(forFile: disk.url.path)).resizable().frame(width: 42, height: 42)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(disk.title).font(.headline)
-                                    Text(sizeText(disk.capacity) + (disk.url.path == "/" ? " · Загрузочный диск" : " · Локальный том"))
+                                    Text(sizeText(disk.capacity) + (disk.url.path == "/" ? " · Startup disk" : " · Local volume"))
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 5) {
-                                    Text("Доступно " + sizeText(disk.available)).font(.callout).monospacedDigit()
+                                    Text("Available: " + sizeText(disk.available)).font(.callout).monospacedDigit()
                                     ProgressView(value: min(1, max(0, 1 - Double(disk.available) / Double(max(1, disk.capacity)))))
                                         .progressViewStyle(.linear).tint(.accentColor)
                                 }.frame(width: 140)
-                                Button("Сканировать") { store.scan(disk) }.padding(.leading, 5)
+                                Button("Scan") { store.scan(disk) }.padding(.leading, 5)
                             }.padding(.horizontal, 19).padding(.vertical, 16)
                             if disk.id != store.disks.last?.id { Divider().padding(.leading, 75) }
                         }
                     }.background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
                 }.frame(maxHeight: CGFloat(min(store.disks.count, 5)) * 80 + 6)
-                Button { store.pickFolder() } label: { Label("Сканировать папку…", systemImage: "folder") }
+                Button { store.pickFolder() } label: { Label("Scan Folder…", systemImage: "folder") }
             }
         }.padding(34).frame(maxWidth: 910).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }

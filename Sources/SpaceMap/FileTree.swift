@@ -95,8 +95,8 @@ final class Entry: Identifiable {
     var url: URL { anchorIsParent ? anchor.appendingPathComponent(name, isDirectory: false) : anchor }
     var folder: Bool { kind == .directory }
     var sizeLabel: String {
-        if sharedOwner != nil { return "Учтено по другому пути" }
-        if unknown > 0 { return bytes == 0 ? "Размер неизвестен" : "Учтено " + sizeText(bytes) }
+        if sharedOwner != nil { return "Counted at another path" }
+        if unknown > 0 { return bytes == 0 ? "Unknown size" : "Counted: " + sizeText(bytes) }
         return sizeText(bytes)
     }
 
@@ -115,8 +115,8 @@ final class Entry: Identifiable {
 }
 
 func sizeText(_ bytes: Int64) -> String {
-    if bytes == 0 { return "0 Б" }
-    let units = ["Б", "КБ", "МБ", "ГБ", "ТБ", "ПБ"]
+    if bytes == 0 { return "0 B" }
+    let units = ["B", "KB", "MB", "GB", "TB", "PB"]
     var amount = Double(bytes), index = 0
     while amount >= 1000 && index < units.count - 1 { amount /= 1000; index += 1 }
     return amount.formatted(.number.precision(.fractionLength(0...1))) + " " + units[index]

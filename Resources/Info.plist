@@ -6,8 +6,8 @@
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleName</key><string>Space Map</string>
 <key>CFBundleIconFile</key><string>SpaceMap.icns</string>
-<key>CFBundleDevelopmentRegion</key><string>ru</string>
-<key>CFBundleLocalizations</key><array><string>ru</string></array>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>en</string></array>
 <key>CFBundleVersion</key><string>2</string>
 <key>CFBundleShortVersionString</key><string>1.0.1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

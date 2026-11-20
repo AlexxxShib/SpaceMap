@@ -12,10 +12,10 @@ struct Inspector: View {
     private var tint: BranchTint? { store.root.flatMap { marker(entry, under: $0) } }
     private var kind: String {
         switch entry.kind {
-        case .directory: return "Папка"
-        case .file: return "Файл"
-        case .package: return "Пакет"
-        case .link: return "Символическая ссылка"
+        case .directory: return "Folder"
+        case .file: return "File"
+        case .package: return "Package"
+        case .link: return "Symbolic Link"
         }
     }
     var body: some View {
@@ -26,7 +26,7 @@ struct Inspector: View {
                         Button { store.open(parent) } label: { Label(store.title(parent), systemImage: "chevron.left") }
                             .buttonStyle(.borderless).lineLimit(1)
                     } else {
-                        Label(store.disk?.isFolder == true ? "Папка" : "Том", systemImage: store.disk?.isFolder == true ? "folder" : "internaldrive")
+                        Label(store.disk?.isFolder == true ? "Folder" : "Volume", systemImage: store.disk?.isFolder == true ? "folder" : "internaldrive")
                     }
                     Spacer()
                 }.font(.callout).foregroundStyle(.secondary)
@@ -36,13 +36,13 @@ struct Inspector: View {
                     Spacer(minLength: 4)
                     if entry.sharedOwner == nil && !(entry.bytes == 0 && entry.unknown > 0) {
                         Text(sizeText(entry.bytes)).font(.title2).monospacedDigit().fixedSize()
-                            .help("\(entry.bytes.formatted()) байт")
+                            .help("\(entry.bytes.formatted()) bytes")
                     }
                 }
-                if entry.unknown > 0 { Label("Пропущено: \(entry.unknown) · " + entry.sizeLabel, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.secondary) }
+                if entry.unknown > 0 { Label("Skipped: \(entry.unknown) · " + entry.sizeLabel, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.secondary) }
                 if entry !== store.snapshot?.root {
                     HStack {
-                        if entry.folder, entry !== store.root { Button("Открыть папку") { store.open(entry) } }
+                        if entry.folder, entry !== store.root { Button("Open Folder") { store.open(entry) } }
                         MarkButton(store: store, entry: entry)
                     }.controlSize(.small)
                 }
@@ -53,7 +53,7 @@ struct Inspector: View {
                 if entry.children.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: entry.unknown > 0 ? "folder.badge.questionmark" : "folder").font(.system(size: 30))
-                        Text(entry.unknown > 0 ? "Содержимое недоступно" : "Папка пуста")
+                        Text(entry.unknown > 0 ? "Contents unavailable" : "This folder is empty")
                     }.foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $focus.row) {
@@ -66,7 +66,7 @@ struct Inspector: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "circle.grid.2x2").foregroundStyle(.secondary)
-                                    Text("Мелкие объекты (\(group.small.count))").lineLimit(1)
+                                    Text("Small items (\(group.small.count))").lineLimit(1)
                                     Spacer()
                                     Text(sizeText(group.smallBytes)).monospacedDigit().foregroundStyle(.secondary)
                                 }.contentShape(Rectangle()).onTapGesture { store.groupOpen.toggle() }
@@ -86,16 +86,16 @@ struct Inspector: View {
             } else {
                 VStack(alignment: .leading, spacing: 15) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path)).resizable().frame(width: 54, height: 54)
-                    LabeledContent("Тип", value: kind)
-                    LabeledContent("Размер на диске", value: entry.unknown > 0 ? "Размер неизвестен" : "\((entry.kind == .package ? entry.bytes : entry.rawBytes).formatted()) байт")
+                    LabeledContent("Type", value: kind)
+                    LabeledContent("Size on disk", value: entry.unknown > 0 ? "Unknown size" : "\((entry.kind == .package ? entry.bytes : entry.rawBytes).formatted()) bytes")
                     if let owner = entry.sharedOwner {
-                        Text("Учтено по другому пути").foregroundStyle(.secondary)
+                        Text("Counted at another path").foregroundStyle(.secondary)
                         Text(owner).textSelection(.enabled)
                     }
                     Divider()
-                    Text("Полный путь").foregroundStyle(.secondary)
+                    Text("Full path").foregroundStyle(.secondary)
                     Text(entry.url.path).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    Button("Скопировать путь") {
+                    Button("Copy Path") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(entry.url.path, forType: .string)
                     }
@@ -125,12 +125,12 @@ struct Inspector: View {
         }.padding(.vertical, 3).contentShape(Rectangle())
             .tag(node.id)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(node.name + ", " + (node.folder ? "папка" : "файл") + ", " + node.sizeLabel + (marked ? ", помечено" : ""))
+            .accessibilityLabel(node.name + ", " + (node.folder ? "folder" : "file") + ", " + node.sizeLabel + (marked ? ", marked for removal" : ""))
             .accessibilityAction { store.activate(node) }
             .onTapGesture { store.activate(node) }
             .contextMenu {
-                Button("Сведения") { store.select(node) }
-                if node.folder { Button("Открыть папку") { store.open(node) } }
+                Button("Details") { store.select(node) }
+                if node.folder { Button("Open Folder") { store.open(node) } }
                 MarkButton(store: store, entry: node)
             }
     }
@@ -145,9 +145,9 @@ struct MarkButton: View {
         Button {
             store.toggle(entry)
         } label: {
-            Label(marked ? "Снять отметку" : (reason == "В составе папки" ? "В составе папки" : "Пометить для удаления"),
+            Label(marked ? "Unmark" : (reason == "Included in a marked folder" ? "Included in a marked folder" : "Mark for Removal"),
                   systemImage: marked ? "minus.circle" : "tray.and.arrow.down")
-        }.disabled(store.busy || (!marked && reason != nil)).help(reason ?? (marked ? "Убрать из очереди" : "Добавить в очередь"))
+        }.disabled(store.busy || (!marked && reason != nil)).help(reason ?? (marked ? "Remove from queue" : "Add to queue"))
     }
 }
 
@@ -157,7 +157,7 @@ struct DetailSheet: View {
     let close: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(queueMode ? "Очередь удаления" : "Сведения о сканировании").font(.title2.weight(.semibold))
+            Text(queueMode ? "Removal Queue" : "Scan Details").font(.title2.weight(.semibold))
             if queueMode {
                 Text(store.summary).monospacedDigit().foregroundStyle(.secondary)
                 List(store.queue.entries) { mark in
@@ -169,15 +169,15 @@ struct DetailSheet: View {
                         }
                         Spacer()
                         Text(sizeText(mark.bytes)).monospacedDigit()
-                        Button { store.unmark(mark.id) } label: { Image(systemName: "minus.circle").accessibilityLabel("Снять отметку") }
+                        Button { store.unmark(mark.id) } label: { Image(systemName: "minus.circle").accessibilityLabel("Unmark") }
                             .buttonStyle(.borderless)
                     }.padding(.vertical, 3)
                 }
             } else {
-                Text("В карте учтены доступные файлы выбранного источника. Системные корзины и другие точки монтирования пропущены.").foregroundStyle(.secondary)
+                Text("The map includes accessible files on the selected disk or in the selected folder. The scan skips Trash folders and other mount points.").foregroundStyle(.secondary)
                 if let snapshot = store.snapshot {
-                    Text("Завершено " + snapshot.finished.formatted() + " · " + sizeText(snapshot.root.bytes))
-                    if snapshot.issues.isEmpty { Text("Ошибок чтения нет.").foregroundStyle(.secondary); Spacer() }
+                    Text("Completed " + snapshot.finished.formatted() + " · " + sizeText(snapshot.root.bytes))
+                    if snapshot.issues.isEmpty { Text("No read errors.").foregroundStyle(.secondary); Spacer() }
                     else {
                         List(snapshot.issues) { item in
                             VStack(alignment: .leading) {
@@ -189,9 +189,9 @@ struct DetailSheet: View {
                 }
             }
             HStack {
-                if queueMode { Button("Очистить список") { store.clear() }.disabled(store.queue.entries.isEmpty || store.busy) }
+                if queueMode { Button("Clear List") { store.clear() }.disabled(store.queue.entries.isEmpty || store.busy) }
                 Spacer()
-                Button("Готово", action: close).keyboardShortcut(.defaultAction)
+                Button("Done", action: close).keyboardShortcut(.defaultAction)
             }
         }.padding(22).frame(width: 560, height: 370)
     }
