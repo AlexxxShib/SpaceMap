@@ -23,7 +23,7 @@ struct Inspector: View {
             VStack(alignment: .leading, spacing: 9) {
                 HStack {
                     if let parent = entry.parent {
-                        Button { if entry === store.root { store.open(parent) } else { store.select(parent) } } label: { Label(store.title(parent), systemImage: "chevron.left") }
+                        Button { store.open(parent) } label: { Label(store.title(parent), systemImage: "chevron.left") }
                             .buttonStyle(.borderless).lineLimit(1)
                     } else {
                         Label(store.disk?.isFolder == true ? "Папка" : "Том", systemImage: store.disk?.isFolder == true ? "folder" : "internaldrive")
@@ -79,7 +79,7 @@ struct Inspector: View {
                         .onKeyPress(.leftArrow) {
                             if focus.row == entry.id && store.groupOpen { store.groupOpen = false; return .handled }
                             guard let parent = entry.parent else { return .ignored }
-                            if entry === store.root { store.open(parent) } else { store.select(parent) }
+                            store.open(parent)
                             return .handled
                         }
                 }
@@ -108,7 +108,7 @@ struct Inspector: View {
     private func inspectFocusedRow() -> KeyPress.Result {
         if focus.row == entry.id { store.groupOpen.toggle(); return .handled }
         guard let node = entry.children.first(where: { $0.id == focus.row }) else { return .ignored }
-        store.select(node)
+        store.activate(node)
         return .handled
     }
 
@@ -126,8 +126,8 @@ struct Inspector: View {
             .tag(node.id)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(node.name + ", " + (node.folder ? "папка" : "файл") + ", " + node.sizeLabel + (marked ? ", помечено" : ""))
-            .accessibilityAction { store.select(node) }
-            .onTapGesture { store.select(node) }
+            .accessibilityAction { store.activate(node) }
+            .onTapGesture { store.activate(node) }
             .contextMenu {
                 Button("Сведения") { store.select(node) }
                 if node.folder { Button("Открыть папку") { store.open(node) } }

@@ -81,12 +81,18 @@ final class RingView: NSView, NSMenuDelegate {
     override var acceptsFirstResponder: Bool { true }
 
     func configure(root: Entry) {
-        if root !== tree { tree = root; lastSize = .zero; hover = nil; toolTip = nil }
+        if root !== tree {
+            tree = root
+            lastSize = .zero
+            hover = nil
+            toolTip = nil
+            menuEntry = nil
+        }
         rebuild()
         needsDisplay = true
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
-        setAccessibilityLabel("Карта диска, " + sizeText(root.bytes) + ". Объекты доступны в списке.")
+        setAccessibilityLabel("Карта, " + (store?.title(root) ?? root.name) + ", " + sizeText(root.bytes) + ". Объекты доступны в списке.")
     }
 
     override func layout() { super.layout(); rebuild() }
@@ -189,13 +195,13 @@ final class RingView: NSView, NSMenuDelegate {
     }
     override func mouseExited(with event: NSEvent) { hover = nil; toolTip = nil; needsDisplay = true }
     override func mouseDown(with event: NSEvent) {
+        guard event.clickCount == 1 else { return }
         let (middle, i) = hit(convert(event.locationInWindow, from: nil))
         if middle, let tree { store?.select(tree); return }
         guard let i else { return }
         let arc = arcs[i]
         if arc.group { store?.selectGroup(arc.entry) }
-        else if event.clickCount == 2 && arc.entry.folder { store?.open(arc.entry) }
-        else { store?.select(arc.entry) }
+        else { store?.activate(arc.entry) }
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let i = hit(convert(event.locationInWindow, from: nil)).1, !arcs[i].group, let store else { return nil }

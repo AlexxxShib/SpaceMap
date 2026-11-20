@@ -38,6 +38,93 @@ struct Checks {
         }
     }
 
+    static func checkIncremental(in base: URL) throws {
+        let fm = FileManager.default
+        let root = base.appendingPathComponent("source", isDirectory: true)
+        let nested = root.appendingPathComponent("A/nested", isDirectory: true)
+        let stable = root.appendingPathComponent("stable", isDirectory: true)
+        try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+        try fm.createDirectory(at: stable, withIntermediateDirectories: true)
+        try Data(repeating: 3, count: 32768).write(to: stable.appendingPathComponent("unchanged"))
+        let changed = nested.appendingPathComponent("data")
+        try Data([5]).write(to: changed)
+        let disk = Disk(root, folder: true)!
+        let cacheURL = base.appendingPathComponent("cache")
+        var changedPaths = ChangedPaths()
+        let live = CommandLine.arguments.contains("--live-journal")
+        let cache: ScanCache
+        if live {
+            // Start immediately after this fixture's creation events, so an older
+            // on-disk journal segment cannot mark the entire new fixture dirty.
+            try fm.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+            guard let point = ChangeJournal.checkpoint(for: root),
+                  let delta = ChangeJournal.changes(since: point, to: point, root: root, synchronizeAt: cacheURL) else {
+                throw CocoaError(.featureUnsupported)
+            }
+            let baseline = JournalPoint(uuid: point.uuid, event: delta.latest, device: point.device,
+                                        mount: point.mount, prefix: point.prefix)
+            cache = ScanCache(directory: cacheURL, checkpoint: { _ in baseline })
+        } else {
+            let point = JournalPoint(uuid: "test", event: 1, device: 1, mount: "/", prefix: "")
+            cache = ScanCache(directory: cacheURL, checkpoint: { _ in point }, changedPaths: { _, _, _ in changedPaths })
+        }
+        let first = try cache.scan(disk, scanner: Scanner())
+        let next = Scanner()
+        changedPaths.add(changed.path)
+        var beforeUpdate: ScanResult?
+        try Data(repeating: 9, count: 131072).write(to: changed)
+        let second = try cache.scan(disk, scanner: next) { old in
+            beforeUpdate = old
+            expect(old.root.bytes == first.root.bytes && old.root.find(changed.path)?.bytes == first.root.find(changed.path)?.bytes,
+                   "до обновления доступна сохранённая карта с вложенными файлами")
+        }
+        let reference = try Scanner().scan(root)
+        expect(second.root.bytes == reference.root.bytes && second.root.signature == reference.root.signature,
+               "изменение вложенного файла совпадает с полным пересчётом")
+        print("Журнал: прочитано папок \(next.directoriesRead), из кэша \(next.directoriesReused)")
+        expect(next.directoriesReused > 0, "неизменённая ветка пропущена при обновлении")
+        if live {
+            for count in [8192, 98304, 16384, 65536] {
+                try Data(repeating: 6, count: count).write(to: changed)
+                let update = Scanner()
+                let immediate = try cache.scan(disk, scanner: update)
+                let current = try Scanner().scan(root)
+                expect(immediate.root.signature == current.root.signature && update.directoriesReused > 0,
+                       "немедленное обновление после записи \(count) байт")
+            }
+        }
+        try fm.moveItem(at: nested, to: root.appendingPathComponent("moved"))
+        try fm.removeItem(at: stable)
+        changedPaths.add(nested.path)
+        changedPaths.add(root.appendingPathComponent("moved").path)
+        changedPaths.add(stable.path)
+        let third = try cache.scan(disk, scanner: Scanner())
+        let fresh = try Scanner().scan(root)
+        expect(third.root.signature == fresh.root.signature && third.root.find(stable.path) == nil &&
+               third.root.find(root.appendingPathComponent("moved/data").path)?.bytes == fresh.root.bytes,
+               "удаление и перенос папок отражены в сохранённой карте")
+        expect(beforeUpdate?.root.find(stable.appendingPathComponent("unchanged").path)?.bytes == first.root.find(stable.path)?.bytes,
+               "открытая старая карта читает прежнюю версию после удаления ветки")
+        if !live {
+            changedPaths = ChangedPaths()
+            let clean = Scanner()
+            _ = try cache.scan(disk, scanner: clean)
+            expect(clean.directoriesRead == 0 && clean.directoriesReused == 1, "без изменений каталоги не читаются")
+            let alias = root.appendingPathComponent("alias")
+            try fm.linkItem(at: root.appendingPathComponent("moved/data"), to: alias)
+            changedPaths.add(alias.path)
+            let linked = try cache.scan(disk, scanner: Scanner())
+            let full = try Scanner().scan(root)
+            expect(linked.root.bytes == full.root.bytes && linked.root.find(alias.path)?.bytes == full.root.find(alias.path)?.bytes,
+                   "новая жёсткая ссылка в другой ветке учтена один раз")
+            let unavailable = ScanCache(directory: cacheURL, checkpoint: { _ in nil })
+            let fallback = Scanner()
+            _ = try unavailable.scan(disk, scanner: fallback)
+            expect(fallback.directoriesRead > 0 && fallback.directoriesReused == 0,
+                   "недоступная история вызывает полный обход")
+        }
+    }
+
     @MainActor static func main() async throws {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("SpaceMap-Tests-" + UUID().uuidString)
@@ -50,6 +137,7 @@ struct Checks {
             try Data(repeating: 0x52, count: count).write(to: url)
             return url
         }
+        try checkIncremental(in: base.appendingPathComponent("incremental"))
         try checkBatchedListing(in: base.appendingPathComponent("Много файлов"))
         let a = try write("A/alpha", 20_000)
         let b = base.appendingPathComponent("beta")
@@ -124,14 +212,48 @@ struct Checks {
         }
         expect(abs(degrees(proportional, forty) - 144) < 0.00001 && abs(degrees(proportional, ten) - 36) < 0.00001 && abs(degrees(forty, ten) - 90) < 0.00001, "геометрия 144° / 36° / 90°")
         expect(makeArcs(node("empty", 0, nil, .directory), levels: 4).isEmpty, "карта пустой папки")
-        let store = Workspace()
+        let suite = "SpaceMap-Checks-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let cachePath = fm.temporaryDirectory.appendingPathComponent("SpaceMap-cache-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: cachePath) }
+        let cache = ScanCache(directory: cachePath)
+        let store = Workspace(cache: cache, preferences: preferences)
+        // Deliver a native click inside the 40% folder sector on the first ring.
+        let ring = RingView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        ring.store = store
+        ring.configure(root: proportional)
+        let angle = 1.6 * Double.pi
+        let point = NSPoint(x: 200 + 50 * cos(angle), y: 200 + 50 * sin(angle))
+        let click = NSEvent.mouseEvent(with: .leftMouseDown, location: ring.convert(point, to: nil),
+                                       modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                       context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        ring.mouseDown(with: click)
+        expect(store.root === forty && store.selection === forty, "щелчок по сектору открывает папку в диаграмме и списке")
+        ring.configure(root: forty)
+        expect(ring.accessibilityLabel()?.contains(forty.name) == true, "диаграмма подписана именем открытой папки")
         store.scan(disk)
-        while store.screen == .scanning { try await Task.sleep(nanoseconds: 10_000_000) }
+        while store.screen == .scanning || store.busy { try await Task.sleep(nanoseconds: 10_000_000) }
         expect(store.screen == .map && store.root != nil, "сканирование из окна выбора")
         let initial = store.root!, child = initial.find(folder.url.path)!
         store.select(child)
         expect(store.selection === child && store.root === initial, "выбор без смены корня")
-        store.open(child)
+        store.activate(child)
+        expect(store.root === child && store.selection === child, "переход из списка меняет центр диаграммы")
+        let relaunched = Workspace(cache: cache, preferences: preferences)
+        relaunched.restoreLastMap()
+        while relaunched.screen == .scanning || relaunched.busy { try await Task.sleep(nanoseconds: 10_000_000) }
+        expect(relaunched.root?.url == child.url && relaunched.snapshot?.root.bytes == initial.bytes,
+               "новая сессия восстанавливает источник и открытую папку")
+        let picked = Workspace(cache: cache, preferences: preferences)
+        let selectedDisk = Disk(selection: FolderSelection(disk.url))!
+        picked.scan(selectedDisk)
+        while picked.screen == .scanning || picked.busy { try await Task.sleep(nanoseconds: 10_000_000) }
+        let savedFolder = Workspace(cache: cache, preferences: preferences)
+        savedFolder.restoreLastMap()
+        while savedFolder.screen == .scanning || savedFolder.busy { try await Task.sleep(nanoseconds: 10_000_000) }
+        expect(savedFolder.disk?.selection?.bookmark != nil && savedFolder.disk?.id == disk.id,
+               "выбранная папка восстанавливается из закладки и сохраняется после обновления карты")
         store.step(-1)
         expect(store.root === initial, "возврат к предыдущей папке")
         store.step(1)
@@ -139,7 +261,7 @@ struct Checks {
         store.toggle(child)
         store.showDisks()
         store.scan(disk)
-        while store.screen == .scanning { try await Task.sleep(nanoseconds: 10_000_000) }
+        while store.screen == .scanning || store.busy { try await Task.sleep(nanoseconds: 10_000_000) }
         expect(store.queue.entries.count == 1, "очередь восстановлена для своего источника")
         store.scan(disk)
         store.showDisks()

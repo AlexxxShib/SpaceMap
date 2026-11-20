@@ -8,13 +8,30 @@ struct SpaceMapApp: App {
     var body: some Scene {
         Window("Space Map", id: "workspace") {
             ContentView(store: store)
+                .onAppear { store.restoreLastMap() }
                 .frame(minWidth: 780, minHeight: 465)
         }
         .defaultSize(width: 1080, height: 680)
         .commands {
+            CommandMenu("Разрешения") {
+                Button("Файлы и папки…") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")!)
+                }
+                Button("Полный доступ к диску…") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                }
+                Divider()
+                Button("Показать Space Map в Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                }
+            }
             CommandGroup(after: .newItem) {
                 Button("Сканировать папку…") { store.pickFolder() }
                     .keyboardShortcut("o").disabled(store.busy || store.screen == .scanning)
+                Button("Пересканировать полностью") {
+                    if let disk = store.disk { store.scan(disk, forceFull: true) }
+                }.keyboardShortcut("r", modifiers: [.command, .shift])
+                 .disabled(store.busy || store.screen != .map)
             }
         }
     }
@@ -75,7 +92,7 @@ struct ContentView: View {
                     } else {
                         Image(systemName: "clock").foregroundStyle(.secondary)
                         if let date = store.snapshot?.finished {
-                            Text("Сканирование в " + date.formatted(date: .omitted, time: .standard)).foregroundStyle(.secondary)
+                            Text((store.busy ? "Обновление карты · " : "Сканирование · ") + date.formatted(date: .abbreviated, time: .standard)).foregroundStyle(.secondary)
                         }
                         Spacer()
                     }
@@ -97,7 +114,7 @@ struct ContentView: View {
             if store.screen == .map {
                 ToolbarItemGroup(placement: .navigation) {
                     Button { store.showDisks() } label: { Image(systemName: "internaldrive").accessibilityLabel("Выбрать диск") }
-                        .help("К выбору диска").disabled(store.busy)
+                        .help("К выбору диска").disabled(!store.canChooseDisk)
                     Button { store.step(-1) } label: { Image(systemName: "chevron.left").accessibilityLabel("Назад") }
                         .disabled(store.position == 0).keyboardShortcut("[")
                     Button { store.step(1) } label: { Image(systemName: "chevron.right").accessibilityLabel("Вперёд") }

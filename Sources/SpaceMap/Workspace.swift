@@ -19,11 +19,17 @@ final class Workspace: ObservableObject {
     @Published var busy = false
     @Published var notice: String?
     @Published var online = true
+    private let cache: ScanCache
+    private let preferences: UserDefaults
+    private var restoredLaunch = false
+    private let lastSourceKey = "SpaceMap.lastSource"
     private var scanTask: Task<ScanResult, Error>?
     private var generation = UUID()
     private var observers: [NSObjectProtocol] = []
 
-    init() {
+    init(cache: ScanCache = ScanCache(), preferences: UserDefaults = .standard) {
+        self.cache = cache
+        self.preferences = preferences
         let center = NSWorkspace.shared.notificationCenter
         for event in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
             observers.append(center.addObserver(forName: event, object: nil, queue: .main) { [weak self] _ in
@@ -32,9 +38,37 @@ final class Workspace: ObservableObject {
         }
     }
 
+    func restoreLastMap() {
+        guard !restoredLaunch else { return }
+        restoredLaunch = true
+        guard let saved = preferences.dictionary(forKey: lastSourceKey),
+              let path = saved["path"] as? String, let folder = saved["folder"] as? Bool else { return }
+        let target: Disk?
+        if folder, let data = saved["bookmark"] as? Data {
+            guard let selection = try? FolderSelection(resolving: data) else {
+                notice = "Чтобы открыть сохранённую карту, выберите папку ещё раз."
+                return
+            }
+            target = Disk(selection: selection)
+        } else {
+            // Also restore maps saved by versions that only recorded the path.
+            target = Disk(URL(fileURLWithPath: path), folder: folder)
+        }
+        guard let target, target.id == saved["source"] as? String,
+              FileManager.default.fileExists(atPath: cache.file(for: target).path) else { return }
+        scan(target, opening: saved["view"] as? String)
+    }
+
+    private func rememberLocation() {
+        guard let disk, let root else { return }
+        var saved: [String: Any] = ["path": disk.url.path, "folder": disk.isFolder, "source": disk.id, "view": root.url.path]
+        saved["bookmark"] = disk.selection?.bookmark
+        preferences.set(saved, forKey: lastSourceKey)
+    }
+
     func refreshDisks() {
         disks = Disk.mounted()
-        if let disk { online = Disk(disk.url, folder: disk.isFolder)?.id == disk.id }
+        if let disk { online = disk.refreshed()?.id == disk.id }
     }
 
     var queue: RemovalQueue { queues[disk?.id ?? ""] ?? RemovalQueue() }
@@ -49,12 +83,18 @@ final class Workspace: ObservableObject {
         panel.canChooseDirectories = true
         panel.prompt = "Сканировать"
         panel.begin { result in
-            if result == .OK, let url = panel.url, let disk = Disk(url, folder: true) { self.scan(disk) }
+            if result == .OK, let url = panel.url, let disk = Disk(selection: FolderSelection(url)) {
+                self.scan(disk)
+            }
         }
     }
 
+    var canChooseDisk: Bool { !busy || scanTask != nil }
+
     func showDisks() {
-        guard !busy else { return }
+        guard canChooseDisk else { return }
+        busy = false
+        preferences.removeObject(forKey: lastSourceKey)
         generation = UUID()
         scanTask?.cancel()
         scanTask = nil
@@ -67,45 +107,88 @@ final class Workspace: ObservableObject {
         refreshDisks()
     }
 
-    func scan(_ target: Disk, keepMap: Bool = false) {
-        let oldPath = disk?.id == target.id ? root?.url.path : nil
+    func scan(_ target: Disk, keepMap: Bool = false, opening: String? = nil, forceFull: Bool = false) {
+        let sameMap = target.id == disk?.id && screen == .map
+        let oldPath = opening ?? (sameMap ? root?.url.path : nil)
         let oldSelection = disk?.id == target.id ? selection?.url.path : nil
         scanTask?.cancel()
         generation = UUID()
         let token = generation
         disk = target
-        online = Disk(target.url, folder: target.isFolder)?.id == target.id
+        online = target.refreshed()?.id == target.id
         progress = (0, target.url.path)
-        if !keepMap { screen = .scanning } else { busy = true }
+        let showingMap = sameMap || keepMap
+        busy = showingMap
+        if !showingMap {
+            screen = .scanning
+            root = nil
+            selection = nil
+            snapshot = nil
+            history = []
+            position = 0
+        }
+        let cache = self.cache
         let job = Task.detached(priority: .userInitiated) { [weak self] in
-            try Scanner { count, path in
+            let scanner = Scanner { count, path in
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == token else { return }
                     self.progress = (count, path)
                 }
-            }.scan(target.url)
+            }
+            return try cache.scan(target, scanner: scanner, forceFull: forceFull) { saved in
+                guard !showingMap else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == token, self.screen == .scanning, self.scanTask != nil else { return }
+                    self.snapshot = saved
+                    let previousFolder = oldPath.flatMap { saved.root.find($0) }
+                    let location = previousFolder.flatMap { $0.folder ? $0 : nil } ?? saved.root
+                    self.root = location
+                    self.select(location)
+                    self.history = [location.url.path]
+                    self.position = 0
+                    self.busy = true
+                    self.screen = .map
+                }
+            } damaged: {
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == token else { return }
+                    self.scan(target, keepMap: self.screen == .map, forceFull: true)
+                }
+            } warning: { message in
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == token else { return }
+                    self.notice = message
+                }
+            }
         }
         scanTask = job
         Task {
             do {
                 let result = try await job.value
                 guard token == generation else { return }
-                guard let currentDisk = Disk(target.url, folder: target.isFolder), currentDisk.id == target.id else {
+                guard let currentDisk = target.refreshed(), currentDisk.id == target.id else {
                     throw NSError(domain: "SpaceMap", code: 1, userInfo: [NSLocalizedDescriptionKey: "Диск отключён или заменён"])
                 }
                 disk = currentDisk
                 snapshot = result
                 var restored = result.root
-                if var path = oldPath {
-                    while result.root.find(path) == nil && path != "/" && !path.isEmpty {
+                if var path = root?.url.path ?? oldPath {
+                    while result.root.find(path)?.folder != true && path != "/" && !path.isEmpty {
                         path = URL(fileURLWithPath: path).deletingLastPathComponent().path
                     }
                     restored = result.root.find(path) ?? result.root
                 }
                 root = restored
-                history = [restored.url.path]
-                position = 0
-                select(oldSelection.flatMap { result.root.find($0) } ?? restored)
+                if !history.indices.contains(position) || history[position] != restored.url.path {
+                    history = [restored.url.path]
+                    position = 0
+                } else {
+                    let prior = history.prefix(position).filter { result.root.find($0)?.folder == true }
+                    history = prior + [restored.url.path] + history.dropFirst(position + 1).filter { result.root.find($0)?.folder == true }
+                    position = prior.count
+                }
+                select((selection?.url.path ?? oldSelection).flatMap { result.root.find($0) } ?? restored)
+                rememberLocation()
                 var q = queue
                 for i in q.entries.indices {
                     let mark = q.entries[i]
@@ -124,7 +207,7 @@ final class Workspace: ObservableObject {
             } catch {
                 guard token == generation else { return }
                 notice = "\(target.title) — \(error.localizedDescription)"
-                if !keepMap { screen = .disks } else { online = false }
+                if screen != .map { screen = .disks } else { online = false }
             }
             busy = false
             scanTask = nil
@@ -139,8 +222,11 @@ final class Workspace: ObservableObject {
         groupOpen = false
         groupSelected = false
     }
+    func activate(_ entry: Entry) {
+        if entry.folder { open(entry) } else { select(entry) }
+    }
     func selectGroup(_ parent: Entry) {
-        select(parent)
+        open(parent)
         groupOpen = true
         groupSelected = true
     }
@@ -150,6 +236,7 @@ final class Workspace: ObservableObject {
             history = Array(history.prefix(position + 1)) + [entry.url.path]
             position = history.count - 1
             root = entry
+            rememberLocation()
         }
         select(entry)
     }
@@ -158,6 +245,7 @@ final class Workspace: ObservableObject {
         guard history.indices.contains(index), let node = snapshot?.root.find(history[index]) else { return }
         position = index
         root = node
+        rememberLocation()
         select(node)
     }
 

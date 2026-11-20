@@ -31,7 +31,7 @@ func fileStatus(_ url: URL) throws -> stat {
     return value
 }
 
-enum EntryKind { case directory, file, package, link }
+enum EntryKind: Int, Codable { case directory, file, package, link }
 
 final class Entry: Identifiable {
     let name: String
@@ -45,7 +45,11 @@ final class Entry: Identifiable {
     let multiLink: Bool
     var containsLinks = false
     var excludedChildren = false
-    var children: [Entry] = []
+    var restoreChildren: ((Entry) -> [Entry])?
+    lazy var children: [Entry] = {
+        defer { restoreChildren = nil }
+        return restoreChildren?(self) ?? []
+    }()
     private var displayOrderReady = false
 
     // Published trees are inspected on the main actor. Sort each folder once, when shown.
@@ -70,13 +74,18 @@ final class Entry: Identifiable {
                   parent: parent, info: info, kind: kind, bytes: bytes)
     }
 
-    init(name: String, anchor: URL, parent: Entry?, info: FileMetadata?, kind: EntryKind, bytes: Int64) {
+    convenience init(name: String, anchor: URL, parent: Entry?, info: FileMetadata?, kind: EntryKind, bytes: Int64) {
+        self.init(name: name, anchor: anchor, parent: parent, identity: info?.identity,
+                  multiLink: info?.multiLink == true, kind: kind, bytes: bytes)
+    }
+
+    init(name: String, anchor: URL, parent: Entry?, identity: FileID?, multiLink: Bool, kind: EntryKind, bytes: Int64) {
         self.name = name
         anchorIsParent = parent != nil && kind != .directory && kind != .package
         self.anchor = anchor
         self.parent = parent
-        identity = info?.identity
-        multiLink = info?.multiLink == true
+        self.identity = identity
+        self.multiLink = multiLink
         containsLinks = multiLink
         self.kind = kind
         rawBytes = bytes
@@ -134,7 +143,7 @@ struct Grouped {
     }
 }
 
-struct ScanIssue: Identifiable {
+struct ScanIssue: Identifiable, Codable {
     var id: String { path }
     let path: String
     let reason: String
@@ -153,11 +162,23 @@ final class Scanner {
     private var count = 0
     private var lastReport = Date.distantPast
     private let reader = DirectoryReader()
+    private(set) var directoriesRead = 0
+    private(set) var directoriesReused = 0
+    var excludedDirectory: FileID?
+    var linkedIdentities: Set<FileID> { Set(hardLinks.keys) }
+    var reuse: ((URL, Entry?, FileMetadata, EntryKind) throws -> Entry?)?
+    var didRead: ((Entry) throws -> Void)?
     let progress: (Int, String) -> Void
 
     init(progress: @escaping (Int, String) -> Void = { _, _ in }) { self.progress = progress }
 
     func scan(_ root: URL) throws -> ScanResult {
+        hardLinks.removeAll()
+        issues.removeAll()
+        count = 0
+        directoriesRead = 0
+        directoriesReused = 0
+        lastReport = .distantPast
         let info = FileMetadata(try fileStatus(root))
         devices = [info.identity.device]
         if root.path == "/", let data = try? fileStatus(URL(fileURLWithPath: "/System/Volumes/Data")) {
@@ -179,9 +200,16 @@ final class Scanner {
         let directory = info.kind == .directory
         let isPackage = directory && retainChildren && parent != nil && isFilePackage(name, at: location)
         let kind: EntryKind = isPackage ? .package : info.kind
+        if directory, retainChildren, let cached = try reuse?(location, parent, info, kind) {
+            directoriesReused += 1
+            return cached
+        }
         let node = Entry(name: name, anchor: location, parent: parent, info: info, kind: kind, bytes: info.allocatedBytes)
-        var digest = Hasher()
-        digest.combine(node.identity)
+        var digest = ScanDigest()
+        digest.combine(Int(info.identity.device))
+        digest.combine(info.identity.inode)
+        digest.combine(info.identity.birth.tv_sec)
+        digest.combine(info.identity.birth.tv_nsec)
         digest.combine(info.modified.tv_sec)
         digest.combine(info.modified.tv_nsec)
         digest.combine(info.logicalBytes)
@@ -193,7 +221,7 @@ final class Scanner {
             }
         } else {
             var members: [DirectoryMember]
-            do { members = try reader.members(at: location) }
+            do { directoriesRead += 1; members = try reader.members(at: location) }
             catch is CancellationError { throw CancellationError() }
             catch {
                 if parent == nil { throw error }
@@ -201,6 +229,7 @@ final class Scanner {
                 node.unknown = 1
                 digest.combine("unreadable")
                 node.signature = digest.finalize()
+                if retainChildren { try didRead?(node) }
                 return node
             }
             let path = location.path
@@ -234,6 +263,7 @@ final class Scanner {
             }
         }
         node.signature = digest.finalize()
+        if directory && retainChildren { try didRead?(node) }
         return node
     }
 
@@ -261,8 +291,21 @@ final class Scanner {
             child.unknown = 1
             return child
         }
-        guard devices.contains(info.identity.device) else { return nil }
+        guard devices.contains(info.identity.device), info.identity != excludedDirectory else { return nil }
         return try visit(name: name, location: info.kind == .directory ? url : directory, parent: parent,
                          info: info, retainChildren: retainChildren)
     }
+}
+
+// Swift's Hasher is seeded per process. Queue verification must also work for a saved map.
+private struct ScanDigest {
+    private var value: UInt64 = 14695981039346656037
+    mutating func combine<T: FixedWidthInteger>(_ number: T) {
+        value = (value ^ UInt64(truncatingIfNeeded: number)) &* 1099511628211
+    }
+    mutating func combine(_ text: String) {
+        combine(text.utf8.count)
+        for byte in text.utf8 { combine(byte) }
+    }
+    func finalize() -> Int { Int(truncatingIfNeeded: value) }
 }
