@@ -4,7 +4,7 @@
 
 Space Map shows which files and folders take up the most space on your Mac. Scan a disk or folder to see its contents as a ring chart. Within each ring, wider segments represent items that use more space. Click a folder to explore it, or mark items for cleanup and review them together before moving them to the Trash.
 
-Space Map is a native Swift app for macOS 14 or later. The interface is in English.
+Space Map is a native Swift app for macOS 14 or later.
 
 ![Space Map showing disk usage for Application Support as a ring chart alongside folder sizes](docs/space-map-screenshot.png)
 
