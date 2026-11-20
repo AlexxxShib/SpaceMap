@@ -6,6 +6,8 @@ Space Map shows which files and folders take up the most space on your Mac. Scan
 
 Space Map is a native Swift app for macOS 14 or later. The interface is in English.
 
+![Space Map showing disk usage for Application Support as a ring chart alongside folder sizes](docs/space-map-screenshot.png)
+
 ## Build and run
 
 Install Apple's Command Line Tools with the macOS 14 SDK or later. From the repository root, run the signing setup once per Mac. It creates a local certificate and stores the key in your login keychain.
